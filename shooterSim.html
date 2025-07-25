@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projectile Shooter Simulator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0; padding: 0; background: #f5f8fa;
+    }
+    .container {
+      max-width: 540px;
+      margin: auto;
+      padding: 1.5em;
+      background: #fff;
+      box-shadow: 0 2px 8px #0001;
+      margin-top: 2em;
+      border-radius: 10px;
+    }
+    h1 {
+      font-size: 1.5em;
+      text-align: center;
+    }
+    label { display: block; margin-top: 1em; }
+    input[type="number"] {
+      width: 100%; padding: 0.5em; font-size: 1em;
+      box-sizing: border-box; margin-top: 0.2em;
+    }
+    button {
+      margin-top: 1.2em;
+      width: 100%; padding: 0.7em;
+      font-size: 1.1em; background: #2C8EFF; color: #fff;
+      border: none; border-radius: 5px; cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #196dd9; }
+    .result {
+      margin-top: 1.5em;
+      background: #e6f2ff;
+      padding: 1em;
+      border-radius: 8px;
+    }
+    canvas {
+      width: 100%;
+      max-width: 500px;
+      height: 180px;
+      background: #fff;
+      border: 1px solid #ccc;
+      margin-top: 1em;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    @media (max-width: 600px) {
+      .container { padding: 0.7em; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Projectile Shooter Simulator</h1>
+    <form id="simForm">
+      <label>
+        Wheel radius (mm):
+        <input type="number" id="radius" value="48" min="1" required>
+      </label>
+      <label>
+        Wheel RPM:
+        <input type="number" id="rpm" value="1500" min="1" required>
+      </label>
+      <label>
+        Launch angle (degrees):
+        <input type="number" id="angle" value="47" min="0" max="89" required>
+      </label>
+      <label>
+        Ball mass (g):
+        <input type="number" id="mass" value="29" min="1" required>
+      </label>
+      <label>
+        Shooter height above ground (m):
+        <input type="number" id="shooterHeight" value="0" min="0" step="0.01" required>
+      </label>
+      <label>
+        Distance to goal (m):
+        <input type="number" id="goalDistance" value="1.2" min="0.1" step="0.01" required>
+      </label>
+      <label>
+        Goal height (m):
+        <input type="number" id="goalHeight" value="1" min="0" step="0.01" required>
+      </label>
+      <button type="submit">Simulate Shot</button>
+    </form>
+    <div class="result" id="result"></div>
+    <canvas id="trajectory" width="500" height="180"></canvas>
+  </div>
+  <script>
+    function toRadians(deg){ return deg * Math.PI/180; }
+
+    function simulate(params) {
+      const g = 9.81;
+      // Inputs
+      let r = params.radius / 1000; // mm to m
+      let omega = params.rpm * 2 * Math.PI / 60; // rad/s
+      let v = omega * r; // m/s
+      let theta = toRadians(params.angle);
+      let h0 = params.shooterHeight;
+      let x_goal = params.goalDistance;
+      let h_goal = params.goalHeight;
+
+      // time to reach x_goal
+      let vx = v * Math.cos(theta);
+      let vy = v * Math.sin(theta);
+
+      // Solve for time t when projectile reaches x_goal
+      let t_goal = x_goal / vx;
+      // y at this time:
+      let y_goal = h0 + vy * t_goal - 0.5 * g * t_goal * t_goal;
+
+      // Find total flight time (until it hits ground)
+      let a = -0.5 * g;
+      let b = vy;
+      let c = h0;
+      // Quadratic: y = 0 = a t^2 + b t + c
+      let discr = b * b - 4 * a * c;
+      let t_total = (-b + Math.sqrt(discr)) / (2*a);
+      if(t_total < 0) t_total = (-b - Math.sqrt(discr)) / (2*a);
+
+      // Find max height
+      let t_peak = vy / g;
+      let y_max = h0 + vy * t_peak - 0.5 * g * t_peak * t_peak;
+
+      // Range (distance until hits ground)
+      let range = vx * t_total;
+
+      return {
+        v: v,
+        t_goal: t_goal,
+        y_goal: y_goal,
+        t_total: t_total,
+        y_max: y_max,
+        range: range,
+        willScore: Math.abs(y_goal - h_goal) < 0.08, // within 8cm of goal
+        undershoot: y_goal < h_goal,
+        overshoot: y_goal > h_goal
+      };
+    }
+
+    function drawTrajectory(params, sim) {
+      const canvas = document.getElementById("trajectory");
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Set up scaling
+      const margin = 30;
+      const w = canvas.width - margin * 2;
+      const h = canvas.height - margin * 2;
+      const maxX = Math.max(sim.range, params.goalDistance) * 1.1;
+      const maxY = Math.max(sim.y_max, params.goalHeight, params.shooterHeight) * 1.2 + 0.2;
+
+      // Draw ground
+      ctx.strokeStyle = "#888";
+      ctx.beginPath();
+      ctx.moveTo(margin, canvas.height - margin);
+      ctx.lineTo(canvas.width - margin, canvas.height - margin);
+      ctx.stroke();
+
+      // Draw goal
+      const xg = margin + (params.goalDistance / maxX) * w;
+      const yg = canvas.height - margin - (params.goalHeight / maxY) * h;
+      ctx.strokeStyle = "#2C8EFF";
+      ctx.beginPath();
+      ctx.moveTo(xg-7, yg);
+      ctx.lineTo(xg+7, yg);
+      ctx.lineTo(xg+7, yg+20);
+      ctx.lineTo(xg-7, yg+20);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fillStyle = "#2C8EFF22";
+      ctx.fill();
+
+      // Draw shooter
+      const xs = margin;
+      const ys = canvas.height - margin - (params.shooterHeight / maxY) * h;
+      ctx.fillStyle = "#aaa";
+      ctx.fillRect(xs-8, ys-8, 16, 16);
+
+      // Draw trajectory
+      ctx.strokeStyle = "#FF8C00";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let started = false;
+      for(let i=0; i<=200; i++) {
+        let t = sim.t_total * i / 200;
+        let x = params.v * Math.cos(toRadians(params.angle)) * t;
+        let y = params.shooterHeight + params.v * Math.sin(toRadians(params.angle)) * t - 0.5 * 9.81 * t * t;
+        if(y<0) break;
+        let cx = margin + (x / maxX) * w;
+        let cy = canvas.height - margin - (y / maxY) * h;
+        if(!started) {
+          ctx.moveTo(cx, cy);
+          started = true;
+        } else {
+          ctx.lineTo(cx, cy);
+        }
+      }
+      ctx.stroke();
+    }
+
+    document.getElementById("simForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      // Gather parameters
+      const params = {
+        radius: parseFloat(document.getElementById("radius").value),
+        rpm: parseFloat(document.getElementById("rpm").value),
+        angle: parseFloat(document.getElementById("angle").value),
+        mass: parseFloat(document.getElementById("mass").value),
+        shooterHeight: parseFloat(document.getElementById("shooterHeight").value),
+        goalDistance: parseFloat(document.getElementById("goalDistance").value),
+        goalHeight: parseFloat(document.getElementById("goalHeight").value)
+      };
+      // Calculate tangential velocity for drawing
+      let omega = params.rpm * 2 * Math.PI / 60;
+      let v = omega * (params.radius/1000);
+      params.v = v;
+
+      const sim = simulate(params);
+
+      // Textual result
+      let result = `<b>Ball exit speed:</b> <b>${sim.v.toFixed(2)}</b> m/s<br>`;
+      result += `<b>Time to goal:</b> ${sim.t_goal.toFixed(2)} s<br>`;
+      result += `<b>Ball height at goal:</b> <b>${sim.y_goal.toFixed(2)}</b> m<br>`;
+      result += `<b>Max height:</b> ${sim.y_max.toFixed(2)} m<br>`;
+      result += `<b>Total flight time:</b> ${sim.t_total.toFixed(2)} s<br>`;
+      result += `<b>Horizontal range:</b> ${sim.range.toFixed(2)} m<br>`;
+      if(sim.willScore) {
+        result += `<span style="color:#2C8EFF;font-weight:bold;">🎯 The ball will go through the goal!</span>`;
+      } else if(sim.undershoot) {
+        result += `<span style="color:#f66;font-weight:bold;">⬇️ The ball is too low at the goal. Try more RPM or a higher angle.</span>`;
+      } else {
+        result += `<span style="color:#f66;font-weight:bold;">⬆️ The ball is too high at the goal. Try less RPM or a lower angle.</span>`;
+      }
+      document.getElementById("result").innerHTML = result;
+
+      // Draw
+      drawTrajectory(params, sim);
+    });
+
+    // Initial draw
+    document.getElementById("simForm").dispatchEvent(new Event("submit"));
+  </script>
+</body>
+</html>
